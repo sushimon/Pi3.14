@@ -205,4 +205,11 @@ If you find our work useful, please consider citing:
 
 
 ## 📄 License
-For academic use, this project is licensed under the 2-clause BSD License. See the [LICENSE](./LICENSE) file for details. For commercial use, please contact the authors.
+This project adopts a dual-licensing strategy:
+
+| Component | License | Commercial Use |
+| :--- | :--- | :--- |
+| **Code** (Scripts, Tools, Logic) | [BSD 3-Clause](LICENSE) | **Permitted** |
+| **Model Weights** (Pi3 and Pi3X Weights) | [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) | **Strictly Non-Commercial** |
+
+**Note on Model Weights:** Due to the nature of the training datasets, the model weights are restricted to non-commercial research and educational purposes only. Redistribution of the weights must maintain this restriction.
