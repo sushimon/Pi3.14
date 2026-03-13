@@ -12,8 +12,8 @@ import time
 # import spaces         # only for web demo
 
 from pi3.utils.geometry import se3_inverse, homogenize_points, depth_edge
-from pi3.models.pi3 import Pi3
-from pi3.utils.basic import load_images_as_tensor
+from pi3.models.pi3x import Pi3X
+from pi3.utils.basic import load_multimodal_data
 
 import trimesh
 import matplotlib
@@ -289,9 +289,8 @@ def run_model(target_dir, model) -> dict:
     if len(image_names) == 0:
         raise ValueError("No images found. Check your upload.")
 
-    # interval = 10 if target_dir.endswith('.mp4') else 1
-    interval = 1
-    imgs = load_images_as_tensor(os.path.join(target_dir, "images"), interval=interval).to(device) # (N, 3, H, W)
+    interval = 10 if target_dir.endswith('.mp4') else 1
+    imgs, _ = load_multimodal_data(os.path.join(target_dir, "images"), interval=interval, device=device)  # (N, 3, H, W)
 
     # 3. Infer
     print("Running model inference...")
@@ -566,10 +565,8 @@ if __name__ == '__main__':
 
     print("Initializing and loading Pi3 model...")
 
-    model = Pi3.from_pretrained("yyfz233/Pi3")
-    # model = Pi3()
-    # model.load_state_dict(torcdtype = torch.bfloat16h.load('ckpts/pi3.pt', weights_only=False, map_location=device))
-
+    model = Pi3X.from_pretrained("yyfz233/Pi3X")
+    model.disable_multimodal()
     model.eval()
     model = model.to(device)
 

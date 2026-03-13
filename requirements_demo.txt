@@ -1,15 +1,18 @@
+gradio==5.17.1
 torch==2.5.1
 torchvision==0.20.1
 numpy==1.26.4
+tqdm
+hydra-core
 pillow
+omegaconf
 opencv-python
 plyfile
-huggingface_hub
+huggingface-hub
+scipy
 safetensors
-
-# below for gradio
-gradio
+onnxruntime
+requests
 trimesh
 matplotlib
-scipy
-# spaces
+pydantic==2.10.6

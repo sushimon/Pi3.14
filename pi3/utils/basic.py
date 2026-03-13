@@ -245,7 +245,7 @@ def load_multimodal_data(path="data/truck", conditions=None, interval=1, PIXEL_L
             
             out_intrinsics = torch.from_numpy(sliced_Ks).float()[None].to(device) # (N, 3, 3)
 
-    return images_tensor[None].to(device), {
+    return images_tensor.to(device), {
         'poses': out_poses,            # (N, 4, 4)
         'depths': out_depths,          # (N, H, W)
         'intrinsics': out_intrinsics   # (N, 3, 3)
