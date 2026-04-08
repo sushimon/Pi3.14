@@ -1,3 +1,4 @@
+import pickle
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -468,6 +469,8 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
                 token_interaction_mask = token_interaction_mask.repeat_interleave(hw - self.patch_start_idx, dim=2)
                 pose_inject_mask = token_interaction_mask[:, None]
 
+        residual_stats = []
+
         for i in range(len(self.decoder)):
             blk = self.decoder[i]
 
@@ -477,8 +480,22 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
             else:
                 pos = pos.reshape(B, N*hw, -1)
                 hidden = hidden.reshape(B, N*hw, -1)
+            
+            # Track difference between layers
+            if i > 0:
+                temp = hidden.clone().detach()
+                hidden = blk(hidden, xpos=pos)
+                residual = hidden - temp
 
-            hidden = blk(hidden, xpos=pos)
+                threshold = 1e-4
+                residual_stats.append({
+                    'percent_near_zero': (torch.abs(residual) < threshold).float().mean().item(),
+                    'l1_norm': torch.sum(torch.abs(residual)).item(),
+                    'l2_norm': torch.sqrt(torch.sum(torch.square(residual))).item(),
+                    'linf_norm': torch.max(torch.abs(residual)).item(),
+                })
+            else:
+                hidden = blk(hidden, xpos=pos)
 
             if self.use_multimodal:
                 if i in [1, 9, 17, 25, 33] and use_pose_mask.sum() > 0:
@@ -491,6 +508,9 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
 
             if i == len(self.decoder) - 2:
                 temp_features = hidden.clone().reshape(B*N, hw, -1)
+
+        with open('residual_stats.pkl', 'wb') as f:
+            pickle.dump(residual_stats, f)
 
         concatenated = torch.cat((temp_features, hidden.reshape(B*N, hw, -1)), dim=-1)
 
