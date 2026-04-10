@@ -274,7 +274,6 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
 
         B, N, _, H, W = imgs.shape
         patch_h, patch_w = H // 14, W // 14
-        self.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
         # encode
         hidden, poses_, use_depth_mask, use_pose_mask, norm_factor = self.encode(
@@ -535,8 +534,8 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
             if i == len(self.decoder) - 2:
                 temp_features = hidden.clone().reshape(B*N, hw, -1)
 
-        with open('residual_stats.pkl', 'wb') as f:
-            pickle.dump(residual_stats, f)
+        # with open('residual_stats.pkl', 'wb') as f:
+        #     pickle.dump(residual_stats, f)
 
         concatenated = torch.cat((temp_features, hidden.reshape(B*N, hw, -1)), dim=-1)
 

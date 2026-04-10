@@ -292,6 +292,9 @@ def run_model(target_dir, model) -> dict:
 
     interval = 10 if target_dir.endswith('.mp4') else 1
     imgs, _ = load_multimodal_data(os.path.join(target_dir, "images"), interval=interval, device=device)  # (N, 3, H, W)
+    N, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     # 3. Infer
     print("Running model inference...")

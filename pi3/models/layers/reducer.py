@@ -175,7 +175,7 @@ class FastVGGTMerging(TokenReducer):
 
                 # Batch fill to target positions - still needs a small loop here, but operations are greatly reduced
                 for i in range(num_images):
-                    grid_start = i * num_images + 5
+                    grid_start = i * tokens_per_image + 5
                     flat_view = idx_buffer_batch[
                         i, :effective_h, :effective_w
                     ].flatten()
@@ -199,9 +199,9 @@ class FastVGGTMerging(TokenReducer):
 
         with torch.no_grad():
             # Find similar dst token for each src token
-            tokens = tokens / tokens.norm(dim=-1, keepdim=True)
-            src = torch.gather(tokens, dim=1, index=self.src_part.expand(self.batch_size, num_src, feature_dim))
-            dst = torch.gather(tokens, dim=1, index=self.dst_part.expand(self.batch_size, num_dst, feature_dim))
+            sim_score = tokens / tokens.norm(dim=-1, keepdim=True)
+            src = torch.gather(sim_score, dim=1, index=self.src_part.expand(self.batch_size, num_src, feature_dim))
+            dst = torch.gather(sim_score, dim=1, index=self.dst_part.expand(self.batch_size, num_dst, feature_dim))
             num_src_actual = src.shape[1]
 
             tokens_to_remove = min(num_src_actual, kwargs['tokens_to_remove'])
@@ -217,6 +217,9 @@ class FastVGGTMerging(TokenReducer):
             self.src_idx = edge_idx[..., :tokens_to_remove, :]
             self.dst_idx = torch.gather(node_idx[..., None], dim=-2, index=self.src_idx)
 
+            # Merging the original tokens
+            src = torch.gather(tokens, dim=1, index=self.src_part.expand(self.batch_size, num_src, feature_dim))
+            dst = torch.gather(tokens, dim=1, index=self.dst_part.expand(self.batch_size, num_dst, feature_dim))
             n, _, c = src.shape
             self.unmerged_len = self.unmerged_idx.shape[1]
             unmerged = torch.gather(src, dim=-2, index=self.unmerged_idx.expand(n, self.unmerged_len, c))
