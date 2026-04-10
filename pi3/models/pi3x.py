@@ -226,7 +226,7 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
                     child.patch_width = patch_width
                     child.patch_height = patch_height
 
-            update_attention_in_module(self.decoder)
+        update_attention_in_module(self.decoder)
 
     def forward(
         self,
@@ -470,7 +470,6 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
         else:
             BN, hw, _ = hidden.shape
             B = BN // N
-
         hidden = hidden.reshape(B*N, hw, -1)
 
         register_token = self.register_token.repeat(B, N, 1, 1).reshape(B*N, *self.register_token.shape[-2:])
@@ -506,22 +505,23 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
             else:  # global attention
                 pos = pos.reshape(B, N*hw, -1)
                 hidden = hidden.reshape(B, N*hw, -1)
+            hidden = blk(hidden, xpos=pos)
             
             # Track difference between layers
-            if i > 0:
-                temp = hidden.clone().detach()
-                hidden = blk(hidden, xpos=pos)
-                residual = hidden - temp
+            # if i > 0:
+            #     temp = hidden.clone().detach()
+            #     hidden = blk(hidden, xpos=pos)
+            #     residual = hidden - temp
 
-                threshold = 1e-4
-                residual_stats.append({
-                    'percent_near_zero': (torch.abs(residual) < threshold).float().mean().item(),
-                    'l1_norm': torch.sum(torch.abs(residual)).item(),
-                    'l2_norm': torch.sqrt(torch.sum(torch.square(residual))).item(),
-                    'linf_norm': torch.max(torch.abs(residual)).item(),
-                })
-            else:
-                hidden = blk(hidden, xpos=pos)
+            #     threshold = 1e-4
+            #     residual_stats.append({
+            #         'percent_near_zero': (torch.abs(residual) < threshold).float().mean().item(),
+            #         'l1_norm': torch.sum(torch.abs(residual)).item(),
+            #         'l2_norm': torch.sqrt(torch.sum(torch.square(residual))).item(),
+            #         'linf_norm': torch.max(torch.abs(residual)).item(),
+            #     })
+            # else:
+            #     hidden = blk(hidden, xpos=pos)
 
             if self.use_multimodal:
                 if i in [1, 9, 17, 25, 33] and use_pose_mask.sum() > 0:

@@ -185,7 +185,6 @@ class FastVGGTMerging(TokenReducer):
             self.dst_len = int((idx_buffer_seq == - 1).sum())
             self.src_part = idx_split[:, self.dst_len:, :]
             self.dst_part = idx_split[:, :self.dst_len, :]
-            self.src_len = self.src_part.shape[1]
 
     def reduce(self, tokens: torch.Tensor, **kwargs) -> torch.Tensor:
         """Returns the result of merging tokens in `tokens` based on the merging scheme used in FastVGGT.
@@ -196,12 +195,13 @@ class FastVGGTMerging(TokenReducer):
         """
         mode = kwargs.get('mode', 'mean')
         self.batch_size, self.num_tokens, feature_dim = tokens.shape
+        num_src, num_dst = self.src_part.shape[1], self.dst_len
 
         with torch.no_grad():
             # Find similar dst token for each src token
             tokens = tokens / tokens.norm(dim=-1, keepdim=True)
-            src = torch.gather(tokens, dim=1, index=self.src_part.expand(self.batch_size, self.src_len, feature_dim))
-            dst = torch.gather(tokens, dim=1, index=self.dst_part.expand(self.batch_size, self.dst_len, feature_dim))
+            src = torch.gather(tokens, dim=1, index=self.src_part.expand(self.batch_size, num_src, feature_dim))
+            dst = torch.gather(tokens, dim=1, index=self.dst_part.expand(self.batch_size, num_dst, feature_dim))
             num_src_actual = src.shape[1]
 
             tokens_to_remove = min(num_src_actual, kwargs['tokens_to_remove'])
