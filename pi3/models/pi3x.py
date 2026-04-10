@@ -23,10 +23,11 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
             self,
             ckpt=None,    
             use_multimodal=True,
-            merge_ratio=0.9,
-            token_reducer_class=FastVGGTMerging
+            merge_ratio=0,
+            token_reducer_class=None
         ):
         super().__init__()
+        assert (token_reducer_class is None) ^ (merge_ratio > 0), 'A token reducer is given iff we are merging.'
 
         self.use_multimodal = use_multimodal
 
