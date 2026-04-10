@@ -15,13 +15,16 @@ from .layers.pos_embed import RoPE2D, PositionGetter
 from .dinov2.hub.backbones import dinov2_vitl14, dinov2_vitl14_reg
 from ..utils.geometry import se3_inverse, get_pixel, homogenize_points
 from .layers.transformer_head import TransformerDecoder, ContextOnlyTransformerDecoder
+from .layers.reducer import FastVGGTMerging
 
 
 class Pi3X(nn.Module, PyTorchModelHubMixin):
     def __init__(
             self,
             ckpt=None,    
-            use_multimodal=True
+            use_multimodal=True,
+            merge_ratio=0.9,
+            token_reducer_class=FastVGGTMerging
         ):
         super().__init__()
 
@@ -63,8 +66,10 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
                 init_values=0.01,
                 qk_norm=True,
                 attn_class=FlashAttentionRope,
-                rope=self.rope
-        ) for _ in range(dec_depth)])
+                rope=self.rope,
+                merge_ratio=0 if i % 2 == 0 else merge_ratio,  # only merge for global layers
+                token_reducer_class=None if i % 2 == 0 else token_reducer_class
+        ) for i in range(dec_depth)])
         self.dec_embed_dim = dec_embed_dim
 
         num_register_tokens = 5
@@ -202,6 +207,25 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
         if free_cuda_cache and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
+    def update_patch_dimensions(self, patch_width: int, patch_height: int):
+        """
+        Update patch dimensions for all attention layers in the model.
+
+        Args:
+            patch_width: Patch width (typically 37)
+            patch_height: Patch height (typically 28)
+        """
+
+        def update_attention_in_module(module):
+            for name, child in module.named_children():
+                # Recursively update submodules
+                update_attention_in_module(child)
+                # If it is an attention layer, update its patch dimensions
+                if hasattr(child, "patch_width") and hasattr(child, "patch_height"):
+                    child.patch_width = patch_width
+                    child.patch_height = patch_height
+
+            update_attention_in_module(self.decoder)
 
     def forward(
         self,
@@ -249,6 +273,7 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
 
         B, N, _, H, W = imgs.shape
         patch_h, patch_w = H // 14, W // 14
+        self.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
         # encode
         hidden, poses_, use_depth_mask, use_pose_mask, norm_factor = self.encode(
@@ -477,7 +502,7 @@ class Pi3X(nn.Module, PyTorchModelHubMixin):
             if i % 2 == 0:
                 pos = pos.reshape(B*N, hw, -1)
                 hidden = hidden.reshape(B*N, hw, -1)
-            else:
+            else:  # global attention
                 pos = pos.reshape(B, N*hw, -1)
                 hidden = hidden.reshape(B, N*hw, -1)
             

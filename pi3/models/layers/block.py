@@ -9,7 +9,7 @@
 
 import logging
 import os
-from typing import Callable, List, Any, Tuple, Dict
+from typing import Callable, List, Any, Tuple, Dict, Optional
 import warnings
 
 import torch
@@ -19,6 +19,7 @@ from .attention import Attention, MemEffAttention, CrossAttentionRope, MemEffCro
 from ..dinov2.layers.drop_path import DropPath
 from ..dinov2.layers.layer_scale import LayerScale
 from ..dinov2.layers.mlp import Mlp
+from .reducer import TokenReducer
 
 
 XFORMERS_ENABLED = os.environ.get("XFORMERS_DISABLED") is None
@@ -274,7 +275,9 @@ class BlockRope(nn.Module):
         attn_class: Callable[..., nn.Module] = Attention,
         ffn_layer: Callable[..., nn.Module] = Mlp,
         qk_norm: bool=False,
-        rope=None
+        rope=None,
+        merge_ratio: float = 0,
+        token_reducer_class: Optional[TokenReducer] = None,
     ) -> None:
         super().__init__()
         # print(f"biases: qkv: {qkv_bias}, proj: {proj_bias}, ffn: {ffn_bias}")
@@ -287,7 +290,9 @@ class BlockRope(nn.Module):
             attn_drop=attn_drop,
             proj_drop=drop,
             qk_norm=qk_norm,
-            rope=rope
+            rope=rope,
+            merge_ratio=merge_ratio,
+            token_reducer_class=token_reducer_class
         )
 
         self.ls1 = LayerScale(dim, init_values=init_values) if init_values else nn.Identity()

@@ -13,6 +13,8 @@ import warnings
 
 from torch import Tensor
 from torch import nn
+from .reducer import TokenReducer
+from typing import Optional
 import torch
 
 from torch.nn.functional import scaled_dot_product_attention
@@ -240,13 +242,23 @@ class AttentionRope(nn.Module):
         proj_drop: float = 0.0,
         qk_norm: bool = False,
         norm_layer: nn.Module = nn.LayerNorm,
-        rope=None
+        rope=None,
+        patch_width: int = 37,
+        patch_height: int = 28,
+        merge_ratio: float = 0,
+        token_reducer_class: Optional[TokenReducer] = None,
     ) -> None:
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads
         self.scale = head_dim**-0.5
         self.head_dim = head_dim
+        self.patch_width = patch_width
+        self.patch_height = patch_height
+        # The percentage of tokens
+        self.merge_ratio = merge_ratio
+        assert (token_reducer_class is None) ^ (merge_ratio > 0), 'A token reducer is given iff we are merging.'
+        self.reducer = None if token_reducer_class is None else token_reducer_class()
 
         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
         self.attn_drop = nn.Dropout(attn_drop)
@@ -328,11 +340,53 @@ class FlashAttentionRope(AttentionRope):
             q = self.rope(q, xpos)
             k = self.rope(k, xpos)
 
-        x = scaled_dot_product_attention(q, k, v)
-        x = x.transpose(1, 2).reshape([B, N, C])
+        if self.merge_ratio > 0 and self.reducer is not None:
+            generator = torch.Generator(device=x.device)
+            generator.manual_seed(42)
+            tokens_to_remove = int(N * self.merge_ratio)
 
+            partition_args = {
+                'width': self.patch_width,
+                'height': self.patch_height,
+                'sx': 2,
+                'sy': 2,
+                'N': N,
+                'generator': generator,
+                'device': x.device,
+            }
+            reduce_args = {
+                'mode': 'mean',
+                'tokens_to_remove': tokens_to_remove,
+            }
+
+            self.reducer.partition(**partition_args)
+            B_q, H_q, N_q, D_q = q.shape
+
+            q_merge_in = q.permute(0, 2, 1, 3).reshape(B_q, N_q, H_q * D_q)
+            k_merge_in = k.permute(0, 2, 1, 3).reshape(B_q, N_q, H_q * D_q)
+            v_merge_in = v.permute(0, 2, 1, 3).reshape(B_q, N_q, H_q * D_q)
+            q_out = self.reducer.reduce(q_merge_in, **reduce_args)
+            k_out = self.reducer.reduce(k_merge_in, **reduce_args)
+            v_out = self.reducer.reduce(v_merge_in, **reduce_args)
+
+            N_m = q_out.shape[1]
+            q = q_out.reshape(B_q, N_m, H_q, D_q).permute(0, 2, 1, 3)
+            k = k_out.reshape(B_q, N_m, H_q, D_q).permute(0, 2, 1, 3)
+            v = v_out.reshape(B_q, N_m, H_q, D_q).permute(0, 2, 1, 3)
+
+            del q_out, k_out, v_out
+
+            N = N_m
+
+        x = scaled_dot_product_attention(q, k, v)
+        del q, k, v
+
+        x = x.transpose(1, 2).reshape([B, N, C])
         x = self.proj(x)
         x = self.proj_drop(x)
+        if self.merge_ratio > 0 and self.reducer is not None:
+            x = self.reducer.expand(x)
+
         return x
 
 def get_attn_score(blk_class, x, frame_num, token_length, xpos=None):
