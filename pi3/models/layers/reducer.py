@@ -1,5 +1,6 @@
 import torch
-from typing import Tuple, Callable, Optional
+from typing import Tuple
+from sklearn_extra.cluster import KMedoids
 from abc import ABC, abstractmethod
 
 
@@ -207,8 +208,6 @@ class FastVGGTMerging(TokenReducer):
             tokens_to_remove = min(num_src_actual, kwargs['tokens_to_remove'])
             chunk_size = min(5000, num_src_actual)
 
-            node_max = torch.empty(self.batch_size, num_src_actual, device=src.device, dtype=src.dtype)
-
             dst_transpose = dst.transpose(-1, -2)
             node_max, node_idx = fast_similarity_chunks(src, dst_transpose, chunk_size)
             edge_idx = node_max.argsort(dim=-1, descending=True)[..., None]
@@ -259,4 +258,55 @@ class FastVGGTMerging(TokenReducer):
                 src=src,
             )
 
+        return out
+
+
+class KMedoidsMerging(TokenReducer):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def partition(self, **kwargs) -> None:
+        pass
+
+    def reduce(self, tokens, **kwargs) -> torch.Tensor:
+        """Merge images by their medoid.
+        """
+        self.batch_size, self.num_tokens, feature_dim = tokens.shape
+        mode = kwargs.get('mode', 'mean')
+        width = kwargs['width']
+        height = kwargs['height']
+        tokens_to_remove = kwargs['tokens_to_remove']
+        tokens_per_image = width * height + 5
+        num_images = self.num_tokens // tokens_per_image
+        assert tokens_per_image * num_images == self.num_tokens, "Token count doesn't match (w*h+5)*num_imgs"
+
+        with torch.no_grad():
+            temp = tokens.squeeze().reshape(num_images, -1)  # (num_images, tokens_per_image * feature_dim)
+            self.dst_len = max(1, num_images - round(tokens_to_remove / tokens_per_image))
+
+            kmedoids = KMedoids(
+                n_clusters=self.dst_len, 
+                random_state=42,
+                ).fit(torch.squeeze(temp))
+
+            # Merging the original tokens
+            merged = torch.zeros(
+                self.batch_size, 
+                self.dst_len * tokens_per_image, 
+                feature_dim, device=tokens.device, 
+                dtype=tokens.dtype
+                )
+            labels = torch.tensor(kmedoids.labels_, device=tokens.device, dtype=torch.int64)
+            index = (labels[:, None] * tokens_per_image + torch.arange(tokens_per_image)).flatten()
+            index = index.unsqueeze(-1).unsqueeze(0).expand(self.batch_size, -1, feature_dim)
+            self.dst_idx = index
+
+            merged = merged.scatter_reduce(-2, index, tokens, reduce=mode, include_self=False)
+
+        return merged
+
+    def expand(self, tokens, **kwargs) -> torch.Tensor:
+        """Duplicate the merged token across the corresponding sources.
+        """
+        out = torch.gather(tokens, dim=1, index=self.dst_idx)
         return out

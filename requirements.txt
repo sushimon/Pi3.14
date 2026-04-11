@@ -6,3 +6,4 @@ opencv-python
 plyfile
 huggingface_hub
 safetensors
+scikit-learn-extra
