@@ -355,6 +355,8 @@ class FlashAttentionRope(AttentionRope):
                 'device': x.device,
             }
             reduce_args = {
+                'width': self.patch_width,
+                'height': self.patch_height,
                 'mode': 'mean',
                 'tokens_to_remove': tokens_to_remove,
             }

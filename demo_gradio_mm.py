@@ -14,7 +14,7 @@ import time
 from pi3.utils.geometry import se3_inverse, homogenize_points, depth_edge
 from pi3.models.pi3x import Pi3X
 from pi3.utils.basic import load_multimodal_data
-from pi3.models.layers.reducer import FastVGGTMerging
+from pi3.models.layers.reducer import FastVGGTMerging, KMedoidsMerging
 
 import trimesh
 import matplotlib
@@ -572,7 +572,8 @@ if __name__ == '__main__':
     model = Pi3X.from_pretrained(
         "yyfz233/Pi3X",
         merge_ratio=0.9,
-        token_reducer_class=FastVGGTMerging,
+        token_reducer_class=KMedoidsMerging,
+        # token_reducer_class=FastVGGTMerging,
         )
     model.disable_multimodal()
     model.eval()

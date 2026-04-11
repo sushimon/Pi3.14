@@ -281,23 +281,25 @@ class KMedoidsMerging(TokenReducer):
         assert tokens_per_image * num_images == self.num_tokens, "Token count doesn't match (w*h+5)*num_imgs"
 
         with torch.no_grad():
-            temp = tokens.squeeze().reshape(num_images, -1)  # (num_images, tokens_per_image * feature_dim)
-            self.dst_len = max(1, num_images - round(tokens_to_remove / tokens_per_image))
+            temp = tokens.reshape(self.batch_size * num_images, tokens_per_image, feature_dim)
+            temp = temp.mean(dim=1)
+            self.dst_len = max(1, self.batch_size * num_images - round(tokens_to_remove / tokens_per_image))
 
             kmedoids = KMedoids(
                 n_clusters=self.dst_len, 
                 random_state=42,
-                ).fit(torch.squeeze(temp))
+                ).fit(torch.squeeze(temp).to(torch.float32).cpu())
 
             # Merging the original tokens
             merged = torch.zeros(
                 self.batch_size, 
                 self.dst_len * tokens_per_image, 
-                feature_dim, device=tokens.device, 
+                feature_dim, 
+                device=tokens.device, 
                 dtype=tokens.dtype
                 )
             labels = torch.tensor(kmedoids.labels_, device=tokens.device, dtype=torch.int64)
-            index = (labels[:, None] * tokens_per_image + torch.arange(tokens_per_image)).flatten()
+            index = (labels[:, None] * tokens_per_image + torch.arange(tokens_per_image, device=tokens.device)).flatten()
             index = index.unsqueeze(-1).unsqueeze(0).expand(self.batch_size, -1, feature_dim)
             self.dst_idx = index
 
