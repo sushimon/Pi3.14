@@ -10,7 +10,7 @@ from PIL import Image
 
 import rootutils
 root = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-from pi3.models.pi3 import Pi3
+from pi3.models.pi3x import Pi3X
 from pi3.utils.geometry import se3_inverse
 
 
@@ -84,9 +84,12 @@ def load_and_resize14(filelist: List[str], new_width: int, device: str, verbose:
     imgs = F.interpolate(imgs, (patch_h * 14, patch_w * 14), mode="bilinear", align_corners=False, antialias=True).unsqueeze(0)
     return imgs
 
-def infer_monodepth(file: str, model: Pi3, hydra_cfg: DictConfig):
+def infer_monodepth(file: str, model: Pi3X, hydra_cfg: DictConfig):
 
     imgs = load_and_resize14([file], new_width=hydra_cfg.load_img_size, device=hydra_cfg.device, verbose=hydra_cfg.verbose)
+    _, _, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     with torch.no_grad():
@@ -98,9 +101,12 @@ def infer_monodepth(file: str, model: Pi3, hydra_cfg: DictConfig):
     return depth_map  # torch.Tensor
 
 
-def infer_videodepth(filelist: str, model: Pi3, hydra_cfg: DictConfig):
+def infer_videodepth(filelist: str, model: Pi3X, hydra_cfg: DictConfig):
 
     imgs = load_and_resize14(filelist, new_width=hydra_cfg.load_img_size, device=hydra_cfg.device, verbose=hydra_cfg.verbose)
+    _, _, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
@@ -115,45 +121,60 @@ def infer_videodepth(filelist: str, model: Pi3, hydra_cfg: DictConfig):
     return end - start, depth_map, depth_conf
 
 
-def infer_cameras_w2c(filelist: str, model: Pi3, hydra_cfg: DictConfig):
+def infer_cameras_w2c(filelist: str, model: Pi3X, hydra_cfg: DictConfig):
 
     imgs = load_and_resize14(filelist, new_width=hydra_cfg.load_img_size, device=hydra_cfg.device, verbose=hydra_cfg.verbose)
+    _, _, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
+    start = time.time()
     with torch.no_grad():
         with torch.amp.autocast(hydra_cfg.device, dtype=dtype):
             pred = model(imgs)
+    end = time.time()
 
     poses_c2w_all = pred['camera_poses'].cpu()
     extrinsics = se3_inverse(poses_c2w_all[0])
 
-    return extrinsics, None
+    return extrinsics, end - start
 
 
-def infer_cameras_c2w(filelist: str, model: Pi3, hydra_cfg: DictConfig):
+def infer_cameras_c2w(filelist: str, model: Pi3X, hydra_cfg: DictConfig):
 
     imgs = load_and_resize14(filelist, new_width=hydra_cfg.load_img_size, device=hydra_cfg.device, verbose=hydra_cfg.verbose)
+    _, _, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
+    start = time.time()
     with torch.no_grad():
         with torch.amp.autocast(hydra_cfg.device, dtype=dtype):
             pred = model(imgs)
+    end = time.time()
 
     poses_c2w_all = pred['camera_poses'].cpu()
 
-    return poses_c2w_all[0], None
+    return poses_c2w_all[0], None, end - start
 
-def infer_mv_pointclouds(filelist: str, model: Pi3, hydra_cfg: DictConfig, data_size: Tuple[int, int]):
+def infer_mv_pointclouds(filelist: str, model: Pi3X, hydra_cfg: DictConfig, data_size: Tuple[int, int]):
 
     imgs = load_and_resize14(filelist, new_width=hydra_cfg.load_img_size, device=hydra_cfg.device, verbose=hydra_cfg.verbose)
+    _, _, _, H, W = imgs.shape
+    patch_h, patch_w = H // 14, W // 14
+    model.update_patch_dimensions(patch_height=patch_h, patch_width=patch_w)
 
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
+    start = time.time()
     with torch.no_grad():
         with torch.amp.autocast(hydra_cfg.device, dtype=dtype):
             pred = model(imgs)
+    end = time.time()
     
     global_points = pred['points'][0]  # (N, h, w, 3)
     global_points = F.interpolate(
@@ -161,4 +182,4 @@ def infer_mv_pointclouds(filelist: str, model: Pi3, hydra_cfg: DictConfig, data_
         mode="bilinear", align_corners=False, antialias=True
     ).permute(0, 2, 3, 1)  # align to gt
 
-    return global_points.cpu().numpy()
+    return global_points.cpu().numpy(), end - start

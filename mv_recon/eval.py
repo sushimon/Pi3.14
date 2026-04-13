@@ -11,7 +11,8 @@ from omegaconf import DictConfig
 
 import rootutils
 root = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-from pi3.models.pi3 import Pi3
+from pi3.models.pi3x import Pi3X
+from pi3.models.layers.reducer import FastVGGTMerging, KMedoidsMerging
 from utils.interfaces import infer_mv_pointclouds
 from mv_recon.utils import umeyama, accuracy, completion
 from utils.messages import set_default_arg, write_csv
@@ -23,12 +24,16 @@ def main(hydra_cfg: DictConfig):
 
     all_eval_datasets: DictConfig = hydra_cfg.eval_datasets  # see configs/evaluation/mv_recon.yaml
     all_data_info: DictConfig     = hydra_cfg.data           # see configs/data
-    pretrained_model_name_or_path: str = hydra_cfg.pi3.pretrained_model_name_or_path  # see configs/evaluation/relpose-angular.yaml
+    pretrained_model_name_or_path: str = hydra_cfg.pi3x.pretrained_model_name_or_path  # see configs/evaluation/relpose-angular.yaml
 
     # 0. create model
-    model = Pi3.from_pretrained(pretrained_model_name_or_path).to(hydra_cfg.device).eval()
+    model = Pi3X.from_pretrained(
+        pretrained_model_name_or_path,
+        merge_ratio=0.3,
+        token_reducer_class=KMedoidsMerging,
+        ).to(hydra_cfg.device).eval()
     logger = logging.getLogger("mv_recon-eval")
-    logger.info(f"Loaded Pi3 from {pretrained_model_name_or_path}")
+    logger.info(f"Loaded Pi3X from {pretrained_model_name_or_path}")
 
     for idx_dataset, dataset_name in enumerate(all_eval_datasets, start=1):
         # 1.1 look up dataset config from configs/data, decide the dataset name, and load the dataset
@@ -41,15 +46,16 @@ def main(hydra_cfg: DictConfig):
         output_root = osp.join(hydra_cfg.output_dir, dataset_name)
         os.makedirs(output_root, exist_ok=True)
         all_data_dict = {
-            "Acc-mean":  0.0,  "Acc-med":  0.0,
-            "Comp-mean": 0.0,  "Comp-med": 0.0,
-            "NC-mean":   0.0,  "NC-med":   0.0,
-            "NC1-mean":  0.0,  "NC1-med":  0.0,
-            "NC2-mean":  0.0,  "NC2-med":  0.0,
+            "Acc-mean":   0.0,  "Acc-med":  0.0,
+            "Comp-mean":  0.0,  "Comp-med": 0.0,
+            "NC-mean":    0.0,  "NC-med":   0.0,
+            "NC1-mean":   0.0,  "NC1-med":  0.0,
+            "NC2-mean":   0.0,  "NC2-med":  0.0,
+            "infer_time": 0.0,
         }
 
         # 1.3 load pre-sampled seq-id-map
-        logger.info(f"[{idx_dataset}/{len(all_eval_datasets)}] Evaluating Multi-View Pointcloud Reconstruction of Pi3 on dataset {dataset_name}...")
+        logger.info(f"[{idx_dataset}/{len(all_eval_datasets)}] Evaluating Multi-View Pointcloud Reconstruction of Pi3X on dataset {dataset_name}...")
         sample_config: DictConfig = dataset_info.sampling
         logger.info(f"Sampling strategy: {sample_config.strategy}")
         with open(dataset_info.seq_id_map, "r") as f:
@@ -67,7 +73,7 @@ def main(hydra_cfg: DictConfig):
 
             # 3. real inference, predicted pointcloud aligned to ground truth (data_h, data_w)
             data_h, data_w         = images.shape[-2:]
-            pred_pts: np.ndarray   = infer_mv_pointclouds(filelist, model, hydra_cfg, (data_h, data_w))  # (N, H, W, 3)
+            pred_pts, infer_time   = infer_mv_pointclouds(filelist, model, hydra_cfg, (data_h, data_w))  # (N, H, W, 3)
             assert pred_pts.shape == gt_pts.shape, f"Predicted points shape {pred_pts.shape} does not match ground truth shape {gt_pts.shape}."
 
             # 4. save input images
@@ -147,17 +153,19 @@ def main(hydra_cfg: DictConfig):
                 "NC1-med":   nc1_med,
                 "NC2-mean":  nc2,
                 "NC2-med":   nc2_med,
+                "infer_time": infer_time,
             })
-            all_data_dict["Acc-mean"]  += acc
-            all_data_dict["Acc-med"]   += acc_med
-            all_data_dict["Comp-mean"] += comp
-            all_data_dict["Comp-med"]  += comp_med
-            all_data_dict["NC-mean"]   += (nc1 + nc2) / 2
-            all_data_dict["NC-med"]    += (nc1_med + nc2_med) / 2
-            all_data_dict["NC1-mean"]  += nc1
-            all_data_dict["NC1-med"]   += nc1_med
-            all_data_dict["NC2-mean"]  += nc2
-            all_data_dict["NC2-med"]   += nc2_med
+            all_data_dict["Acc-mean"]   += acc
+            all_data_dict["Acc-med"]    += acc_med
+            all_data_dict["Comp-mean"]  += comp
+            all_data_dict["Comp-med"]   += comp_med
+            all_data_dict["NC-mean"]    += (nc1 + nc2) / 2
+            all_data_dict["NC-med"]     += (nc1_med + nc2_med) / 2
+            all_data_dict["NC1-mean"]   += nc1
+            all_data_dict["NC1-med"]    += nc1_med
+            all_data_dict["NC2-mean"]   += nc2
+            all_data_dict["NC2-med"]    += nc2_med
+            all_data_dict["infer_time"] += infer_time
 
             # release cuda memory
             torch.cuda.empty_cache()
@@ -177,7 +185,7 @@ def main(hydra_cfg: DictConfig):
     
     del model
     torch.cuda.empty_cache()
-    logger.info(f"Finished evaluating Pi3 on all datasets.")
+    logger.info(f"Finished evaluating Pi3X on all datasets.")
 
 
 if __name__ == "__main__":

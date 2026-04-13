@@ -10,7 +10,8 @@ from omegaconf import DictConfig
 
 import rootutils
 root = rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
-from pi3.models.pi3 import Pi3
+from pi3.models.pi3x import Pi3X
+from pi3.models.layers.reducer import FastVGGTMerging, KMedoidsMerging
 from utils.interfaces import infer_cameras_c2w
 from utils.files import list_imgs_a_sequence, get_all_sequences
 from utils.messages import set_default_arg, write_csv, save_list_of_matrices
@@ -22,12 +23,16 @@ def main(hydra_cfg: DictConfig):
 
     all_eval_datasets: DictConfig = hydra_cfg.eval_datasets  # see configs/evaluation/relpose-distance.yaml
     all_data_info: DictConfig     = hydra_cfg.data           # see configs/data
-    pretrained_model_name_or_path: str = hydra_cfg.pi3.pretrained_model_name_or_path  # see configs/evaluation/relpose-angular.yaml
+    pretrained_model_name_or_path: str = hydra_cfg.pi3x.pretrained_model_name_or_path  # see configs/evaluation/relpose-angular.yaml
 
     # 0. create model
-    model = Pi3.from_pretrained(pretrained_model_name_or_path).to(hydra_cfg.device).eval()
+    model = Pi3X.from_pretrained(
+        pretrained_model_name_or_path,
+        merge_ratio=0.3,
+        token_reducer_class=KMedoidsMerging,
+        ).to(hydra_cfg.device).eval()
     logger = logging.getLogger(f"relpose-dist")
-    logger.info(f"Loaded Pi3 from {pretrained_model_name_or_path}")
+    logger.info(f"Loaded Pi3X from {pretrained_model_name_or_path}")
 
     for idx_dataset, dataset_name in enumerate(all_eval_datasets, start=1):
         # 1. look up dataset config from configs/data, decide the dataset name
@@ -45,6 +50,7 @@ def main(hydra_cfg: DictConfig):
         logger.info(f"[{idx_dataset}/{len(all_eval_datasets)}] Infering relpose(c2w) on {dataset_name} dataset..., output to {osp.relpath(output_root, hydra_cfg.work_dir)}")
 
         results = []
+        times = []
         tbar = tqdm(seq_list, desc=f"[{dataset_name} eval]")
         for seq in tbar:
             # 4.1 list all images of this sequence
@@ -54,7 +60,11 @@ def main(hydra_cfg: DictConfig):
             # 4.2 real inference
             # pr_poses: c2w poses, (N, 3, 4), in torch
             # pr_intrs: focals + pps, (N, 3, 3), in numpy
-            pr_poses, pr_intrs = infer_cameras_c2w(filelist, model, hydra_cfg)
+            pr_poses, pr_intrs, infer_time = infer_cameras_c2w(filelist, model, hydra_cfg)
+            temp = pr_poses.detach().cpu()
+            del pr_poses
+            torch.cuda.empty_cache()
+            pr_poses = temp
             pred_traj = get_tum_poses(pr_poses)
 
             # 4.3 save predicted poses & intrinsics
@@ -99,9 +109,11 @@ def main(hydra_cfg: DictConfig):
                 "ATE": ate,
                 "RPE trans": rpe_trans,
                 "RPE rot": rpe_rot,
+                "infer_time": infer_time,
             }
             write_csv(osp.join(output_root, "seq_metrics.csv"), seq_metrics)
             results.append((seq, ate, rpe_trans, rpe_rot))
+            times.append(infer_time)
 
             # 4.7. update metric for a sequence to tqdm bar
             tbar.set_postfix_str(f"Seq {seq} ATE: {ate:5.2f} | RPE-trans: {rpe_trans:5.2f} | RPE-rot: {rpe_rot:5.2f}")
@@ -112,6 +124,7 @@ def main(hydra_cfg: DictConfig):
             "ATE": avg_ate,
             "RPE trans": avg_rpe_trans,
             "RPE rot": avg_rpe_rot,
+            'infer_time': np.average(times).item(),
         }
         statistics_file = osp.join(hydra_cfg.output_dir, f"{dataset_name}-metric")  # + ".csv"
         if getattr(hydra_cfg, "save_suffix", None) is not None:

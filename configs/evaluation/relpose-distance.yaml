@@ -5,14 +5,14 @@ defaults:
 
 name: relpose-distance
 
-pi3:
-  pretrained_model_name_or_path: yyfz233/Pi3
+pi3x:
+  pretrained_model_name_or_path: yyfz233/Pi3X
   # pretrained_model_name_or_path: checkpoints/Pi3
 
 eval_datasets:
   - sintel
-  - tum
-  - scannetv2
+  # - tum
+  # - scannetv2
 
 no_crop: False
 load_img_size: 512
