@@ -1,4 +1,5 @@
 import torch
+import gc
 from typing import Tuple
 from sklearn_extra.cluster import KMedoids
 from abc import ABC, abstractmethod
@@ -78,6 +79,15 @@ class TokenReducer(ABC):
         reduction.
         """
         ...
+
+    def reset(self) -> None:
+        """Resets the instance attributes to free memory.
+        """
+        for attr in vars(self):
+            setattr(self, attr, None)
+        
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 class FastVGGTMerging(TokenReducer):
@@ -281,14 +291,14 @@ class KMedoidsMerging(TokenReducer):
         assert tokens_per_image * num_images == self.num_tokens, "Token count doesn't match (w*h+5)*num_imgs"
 
         with torch.no_grad():
-            temp = tokens.reshape(self.batch_size * num_images, tokens_per_image, feature_dim)
+            temp = tokens.reshape(self.batch_size * num_images, tokens_per_image, -1)
             temp = temp.mean(dim=1)
             self.dst_len = max(1, self.batch_size * num_images - round(tokens_to_remove / tokens_per_image))
 
             kmedoids = KMedoids(
                 n_clusters=self.dst_len, 
                 random_state=42,
-                ).fit(torch.squeeze(temp).to(torch.float32).cpu())
+                ).fit(temp.reshape(self.batch_size * num_images, -1).to(torch.float32).cpu())
 
             # Merging the original tokens
             merged = torch.zeros(

@@ -388,6 +388,7 @@ class FlashAttentionRope(AttentionRope):
         x = self.proj_drop(x)
         if self.merge_ratio > 0 and self.reducer is not None:
             x = self.reducer.expand(x)
+            self.reducer.reset()
 
         return x
 
